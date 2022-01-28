@@ -4,7 +4,6 @@ Subprocess run tool, that makes the syntax for running a subprocess easier
 
 import subprocess
 import string
-import os
 import sys
 import inspect
 import shlex
@@ -25,17 +24,19 @@ class _ShellQuoteFormatter(string.Formatter):
 
     def format_field(self, value, format_spec):
         if value is None:
-            value = ''
+            str_value = ''
         else:
-            value = str(value)
+            str_value = str(value)
         if self._shell:
-            if format_spec == 'r':
-                return value
+            if format_spec == 'r':  # raw
+                return str_value
+            elif format_spec == 'l':  # list
+                return ' '.join(shlex.quote(str(v)) for v in value)
             else:
                 print(f'quoting value {value}')
-                return shlex.quote(value)
+                return shlex.quote(str_value)
         else:
-            return value
+            return str_value
 
 
 class _SimpleFormatter(string.Formatter):
@@ -50,13 +51,13 @@ class _SimpleFormatter(string.Formatter):
         self.args = []
 
     def format_field(self, value, format_spec):
-        return value
+        return f'{{{value}:{format_spec}}}'
 
     def get_field(self, field_name, args, kwargs):
         index = len(self.args)
         value, used_fields = super().get_field(field_name, args, kwargs)
         self.args.append(value)
-        return f'{{{index}}}', used_fields
+        return f'{index}', used_fields
 
 
 class _EvalFormatter(string.Formatter):
@@ -67,37 +68,78 @@ class _EvalFormatter(string.Formatter):
     `args` field.
     This formatter must be used with _ShellQuoteFormatter.
     '''
-    def __init__(self, frame):
-        self.frame = frame
+    def __init__(self, caller_eval):
+        self.caller_eval = caller_eval
         self.args = []
 
     def format_field(self, value, format_spec):
-        return f'{{{value}:{format_spec}}}'
+        index = len(self.args)
+        eval_result = self.caller_eval(value)
+        if format_spec == 'l':
+            self.args.extend(eval_result)
+            return ' '.join(f'{{{i+index}}}' for i in range(len(eval_result)))
+        else:
+            self.args.append(eval_result)
+            return f'{{{index}:{format_spec}}}'
 
     def get_field(self, field_name, args, kwargs):
-        index = len(self.args)
-        self.args.append(eval(field_name, self.frame.f_globals, self.frame.f_locals))
-        return f'{index}', field_name
+        return field_name, field_name
 
 
-def cmd(command, shell=False):
+class _CallerEval:
+    '''
+    Context manager that yields an eval function, which evaluates the given expression in the context
+    of the caller (more specifically the caller of `_CallerEval()`).
+    '''
+    def __init__(self):
+        self.frame = inspect.currentframe().f_back.f_back
+
+    def _eval(self, expr):
+        return eval(expr, self.frame.f_globals, self.frame.f_locals)
+
+    def __enter__(self):
+        return self._eval
+
+    def __exit__(self, *exc):
+        del self.frame
+
+
+def cmd(*command, shell=False):
     '''
     A command object that can be executed with `.call()`, `.run()`, or `.read()`. The input command
-    can either be a string, or a list of strings. The list of strings will be passed to
-    ' '.join(t for t in command if t). This allows for conditional arguments in the form of
-      cmd([
-        'command',
+    can one or more strings. Falsy values are filtered out from the list and then joined using with
+    a space, i.e. ' '.join(t for t in command if t). This allows for conditional arguments in the
+    form of
+      cmd('command',
         condition and '--conditional_flag',
-        '--cond_flag' if cond else '',
-      ])
+        '--cond_flag' if cond else '')
+
+    Any format strings in the form {foo} is evaluated in the caller's context, similar to f-strings.
+    The format string can be any valid Python expression, like {foo}, {os.getenv("PWD")}, or
+    {1 + 2 + 3}.
+
+    Additionally, a format spec can be given in the form `{foo:r}` for special formats.
+
+    Format specs:
+        r - Raw string. Only affects commands with `shell=True`, and strings with this value will be
+            inserted verbatim into the shell command without escaping. Read the security
+            considerations https://docs.python.org/3/library/subprocess.html#security-considerations
+            before proceeding.
+        l - List. This is for inserting a list of arguments into the command. The value for this
+            format string should be a sequence (e.g. list or tuple), and its values will be inserted
+            into the command as separate values.
+            e.g. files = [f for f in os.listdir(pwd) if not f.startswith('.')]
+                 cmd('grep -e {pattern} {files:l}')
+
+    Note that the string MUST be a literal inside cmd. Accepting it from other function callers will
+    cause unintended side effects.
+
+    Good: cmd('echo {name}')
+    Bad: cmd(my_command_argument)
     '''
-    if isinstance(command, list):
-        command = ' '.join(t for t in command if t)
-    frame = inspect.currentframe().f_back
-    try:
-        return format_cmd(command, formatter=_EvalFormatter(frame), shell=shell)
-    finally:
-        del frame
+    command = ' '.join(t for t in command if t)
+    with _CallerEval() as caller_eval:
+        return format_cmd(command, formatter=_EvalFormatter(caller_eval), shell=shell)
 
 
 def format_cmd(command, *args, formatter=None, shell=False, **kwargs):
@@ -117,8 +159,8 @@ def format_cmd(command, *args, formatter=None, shell=False, **kwargs):
 
 
 class CmdObject:
-    def __init__(self, cmd, *, shell):
-        self._called = False
+    def __init__(self, cmd, *, shell, warn_uncalled=True):
+        self._called = not warn_uncalled
         self.cmd = cmd
         self._shell = shell
         self.result = None
