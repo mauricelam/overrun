@@ -51,16 +51,19 @@ class _SimpleFormatter(string.Formatter):
         self.args = []
 
     def format_field(self, value, format_spec):
-        return f'{{{value}:{format_spec}}}'
+        index = len(self.args)
+        self.args.append(value)
+        if format_spec == 'l':
+            return ' '.join(f'{{{index}[{i}]}}' for i in range(len(value)))
+        else:
+            return f'{{{index}:{format_spec}}}'
 
     def get_field(self, field_name, args, kwargs):
-        index = len(self.args)
         value, used_fields = super().get_field(field_name, args, kwargs)
-        self.args.append(value)
-        return f'{index}', used_fields
+        return value, used_fields
 
 
-class _EvalFormatter(string.Formatter):
+class _EvalFormatter(_SimpleFormatter):
     '''
     Formats the given string by evaluating all of the "fields" as code in its original context,
     making it behave like f-strings.
@@ -69,21 +72,12 @@ class _EvalFormatter(string.Formatter):
     This formatter must be used with _ShellQuoteFormatter.
     '''
     def __init__(self, caller_eval):
+        super().__init__()
         self.caller_eval = caller_eval
-        self.args = []
-
-    def format_field(self, value, format_spec):
-        index = len(self.args)
-        eval_result = self.caller_eval(value)
-        if format_spec == 'l':
-            self.args.extend(eval_result)
-            return ' '.join(f'{{{i+index}}}' for i in range(len(eval_result)))
-        else:
-            self.args.append(eval_result)
-            return f'{{{index}:{format_spec}}}'
 
     def get_field(self, field_name, args, kwargs):
-        return field_name, field_name
+        value = self.caller_eval(field_name)
+        return value, field_name
 
 
 class _CallerEval:

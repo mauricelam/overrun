@@ -85,6 +85,11 @@ class TestOverrun(unittest.TestCase):
         value = cmd('printf "[%s]" {test:l}', shell=self.shell).read()
         self.assertEqual(value, '[1][2][3][4][5]')
 
+    def test_list_interpolation_manual(self):
+        test = ['1', '2', '3', '4', '5']
+        value = format_cmd('printf "[%s]" {test:l}', test=test, shell=self.shell).read()
+        self.assertEqual(value, '[1][2][3][4][5]')
+
 
 class TestOverrunShell(TestOverrun):
     shell = True
