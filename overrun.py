@@ -2,6 +2,7 @@
 Subprocess run tool, that makes the syntax for running a subprocess easier
 '''
 
+from contextlib import nullcontext
 import subprocess
 import string
 import sys
@@ -33,7 +34,6 @@ class _ShellQuoteFormatter(string.Formatter):
             elif format_spec == 'l':  # list
                 return ' '.join(shlex.quote(str(v)) for v in value)
             else:
-                print(f'quoting value {value}')
                 return shlex.quote(str_value)
         else:
             return str_value
@@ -71,19 +71,19 @@ class _EvalFormatter(_SimpleFormatter):
     `args` field.
     This formatter must be used with _ShellQuoteFormatter.
     '''
-    def __init__(self, caller_eval):
+    def __init__(self, evaluator):
         super().__init__()
-        self.caller_eval = caller_eval
+        self.evaluator = evaluator
 
     def get_field(self, field_name, args, kwargs):
-        value = self.caller_eval(field_name)
+        value = self.evaluator(field_name)
         return value, field_name
 
 
-class _CallerEval:
+class CallerEval:
     '''
     Context manager that yields an eval function, which evaluates the given expression in the context
-    of the caller (more specifically the caller of `_CallerEval()`).
+    of the caller (more specifically the caller of `CallerEval()`).
     '''
     def __init__(self):
         self.frame = inspect.currentframe().f_back.f_back
@@ -98,7 +98,7 @@ class _CallerEval:
         del self.frame
 
 
-def cmd(*command, shell=False):
+def cmd(*command, shell=False, evaluator=None, warn_uncalled=True):
     '''
     A command object that can be executed with `.call()`, `.run()`, or `.read()`. The input command
     can one or more strings. Falsy values are filtered out from the list and then joined using with
@@ -131,12 +131,15 @@ def cmd(*command, shell=False):
     Good: cmd('echo {name}')
     Bad: cmd(my_command_argument)
     '''
-    command = ' '.join(t for t in command if t)
-    with _CallerEval() as caller_eval:
-        return format_cmd(command, formatter=_EvalFormatter(caller_eval), shell=shell)
+    command = ' '.join(str(t) for t in command if t)
+    with (nullcontext(evaluator) if evaluator else CallerEval()) as evaluator:
+        return format_cmd(command,
+            formatter=_EvalFormatter(evaluator),
+            shell=shell,
+            warn_uncalled=warn_uncalled)
 
 
-def format_cmd(command, *args, formatter=None, shell=False, **kwargs):
+def format_cmd(command, *args, formatter=None, shell=False, warn_uncalled=True, **kwargs):
     '''
     Same as `cmd`, but with less magic. Instead of automatically evaluating all of the fields in the
     command, this behaves more like traditional str.format, expecting the field values to be passed
@@ -149,7 +152,7 @@ def format_cmd(command, *args, formatter=None, shell=False, **kwargs):
         second_result = quote_formatter.format(first_result, *formatter.args)
     else:
         second_result = [quote_formatter.format(token, *formatter.args) for token in shlex.split(first_result)]
-    return CmdObject(second_result, shell=shell)
+    return CmdObject(second_result, shell=shell, warn_uncalled=warn_uncalled)
 
 
 class CmdObject:
