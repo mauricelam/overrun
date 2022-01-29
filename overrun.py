@@ -2,7 +2,7 @@
 Subprocess run tool, that makes the syntax for running a subprocess easier
 '''
 
-from contextlib import nullcontext
+from contextlib import contextmanager
 import subprocess
 import string
 import sys
@@ -139,6 +139,11 @@ def cmd(*command, shell=False, evaluator=None, warn_uncalled=True):
             warn_uncalled=warn_uncalled)
 
 
+@contextmanager
+def nullcontext(value):
+    yield value
+
+
 def format_cmd(command, *args, formatter=None, shell=False, warn_uncalled=True, **kwargs):
     '''
     Same as `cmd`, but with less magic. Instead of automatically evaluating all of the fields in the
@@ -187,10 +192,7 @@ class CmdObject:
         return subprocess.Popen(self.cmd, shell=self._shell, **kwargs)
 
     def _display_cmd(self):
-        if isinstance(self.cmd, str):
-            return self.cmd
-        else:
-            return ' '.join(shlex.quote(t) for t in self.cmd)
+        return self.cmd
 
     def __repr__(self):
         return f'CmdObject(cmd={self.cmd})'
