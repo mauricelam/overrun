@@ -172,8 +172,11 @@ class CmdObject:
         if verbose:
             print(f'Run command: {self._display_cmd()}', file=sys.stderr)
         if silent:
-            kwargs['stdout'] = subprocess.DEVNULL
-            kwargs['stderr'] = subprocess.DEVNULL
+            kwargs = {
+                'stdout': subprocess.DEVNULL,
+                'stderr': subprocess.DEVNULL,
+                **kwargs
+            }
         self.result = CompletedProcess(
             subprocess.run(self.cmd, shell=self._shell, **kwargs))
         return self.result
