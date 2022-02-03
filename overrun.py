@@ -10,20 +10,21 @@ import inspect
 import shlex
 
 
-class _ShellQuoteFormatter(string.Formatter):
+class _SimpleFormatter(string.Formatter):
     '''
-    Formats a given string for shell use.
+    Formats the given string by using the default string.format implementation.
+    The output of this formatter returns a string with {0}, {1}, etc, and stores the output in the
+    `args` field.
+    `format2()` must be used on the output value of `format()` for this formatter.
+    '''
 
-    `None` values are treated like empty strings.
-    If shell is True,
-        the results are quoted unless the format spec is 'r'
-    Otherwise,
-        the value is returned
-    '''
     def __init__(self, *, shell=False):
+        self.args = []
         self._shell = shell
 
-    def format_field(self, value, format_spec):
+    def _shell_quote(self, value, format_spec):
+        if format_spec == 'l':  # list
+            return [self._shell_quote(v, '') for v in value]
         if value is None:
             str_value = ''
         else:
@@ -31,36 +32,29 @@ class _ShellQuoteFormatter(string.Formatter):
         if self._shell:
             if format_spec == 'r':  # raw
                 return str_value
-            elif format_spec == 'l':  # list
-                return ' '.join(shlex.quote(str(v)) for v in value)
             else:
                 return shlex.quote(str_value)
         else:
             return str_value
 
-
-class _SimpleFormatter(string.Formatter):
-    '''
-    Formats the given string by using the default string.format implementation.
-    The output of this formatter returns a string with {0}, {1}, etc, and stores the output in the
-    `args` field.
-    This formatter must be used with _ShellQuoteFormatter.
-    '''
-
-    def __init__(self):
-        self.args = []
+    def parse(self, format_string):
+        return ((literal.replace('{', '{{').replace('}', '}}'), field_name, format_spec, conversion)
+                for literal, field_name, format_spec, conversion in super().parse(format_string))
 
     def format_field(self, value, format_spec):
         index = len(self.args)
-        self.args.append(value)
+        self.args.append(self._shell_quote(value, format_spec))
         if format_spec == 'l':
             return ' '.join(f'{{{index}[{i}]}}' for i in range(len(value)))
         else:
-            return f'{{{index}:{format_spec}}}'
+            return f'{{{index}}}'
 
     def get_field(self, field_name, args, kwargs):
         value, used_fields = super().get_field(field_name, args, kwargs)
         return value, used_fields
+
+    def format2(self, format_string):
+        return format_string.format(*self.args)
 
 
 class _EvalFormatter(_SimpleFormatter):
@@ -69,7 +63,7 @@ class _EvalFormatter(_SimpleFormatter):
     making it behave like f-strings.
     The output of this formatter returns a string with {0}, {1}, etc, and stores the output in the
     `args` field.
-    This formatter must be used with _ShellQuoteFormatter.
+    `format2()` must be used on the output value of `format()` for this formatter.
     '''
     def __init__(self, evaluator):
         super().__init__()
@@ -105,8 +99,8 @@ def cmd(*command, shell=False, evaluator=None, warn_uncalled=True):
     a space, i.e. ' '.join(t for t in command if t). This allows for conditional arguments in the
     form of
       cmd('command',
-        condition and '--conditional_flag',
-        '--cond_flag' if cond else '')
+          (condition) and '--conditional_flag',
+          '--cond_flag' if cond else '')
 
     Any format strings in the form {foo} is evaluated in the caller's context, similar to f-strings.
     The format string can be any valid Python expression, like {foo}, {os.getenv("PWD")}, or
@@ -151,12 +145,12 @@ def format_cmd(command, *args, formatter=None, shell=False, warn_uncalled=True, 
     in through the `args` and `kwargs` of this method.
     '''
     formatter = formatter or _SimpleFormatter()
+    formatter._shell = shell
     first_result = formatter.format(command, *args, **kwargs)
-    quote_formatter = _ShellQuoteFormatter(shell=shell)
     if shell:
-        second_result = quote_formatter.format(first_result, *formatter.args)
+        second_result = formatter.format2(first_result)
     else:
-        second_result = [quote_formatter.format(token, *formatter.args) for token in shlex.split(first_result)]
+        second_result = [formatter.format2(token) for token in shlex.split(first_result)]
     return CmdObject(second_result, shell=shell, warn_uncalled=warn_uncalled)
 
 

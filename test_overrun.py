@@ -12,8 +12,8 @@ class TestOverrun(unittest.TestCase):
 
     def test_value_interpolation(self):
         testing = 'Testing 123'
-        value = cmd('printf "%s\n" {testing}', shell=self.shell).read()
-        self.assertEqual(value, 'Testing 123')
+        value = cmd('printf "[%s]" {testing}', shell=self.shell).read()
+        self.assertEqual(value, '[Testing 123]')
 
     def test_value_interpolation_newline(self):
         testing = 'Testing\n123'
@@ -81,14 +81,18 @@ class TestOverrun(unittest.TestCase):
         self.assertEqual(value, f'[{str(self)}]')
 
     def test_list_interpolation(self):
-        test = ['1', '2', '3', '4', '5']
+        test = ['1 2', '3 4', '5 6']
         value = cmd('printf "[%s]" {test:l}', shell=self.shell).read()
-        self.assertEqual(value, '[1][2][3][4][5]')
+        self.assertEqual(value, '[1 2][3 4][5 6]')
 
     def test_list_interpolation_manual(self):
         test = ['1', '2', '3', '4', '5']
         value = format_cmd('printf "[%s]" {test:l}', test=test, shell=self.shell).read()
         self.assertEqual(value, '[1][2][3][4][5]')
+
+    def test_escaped_curly_braces(self):
+        value = cmd('printf "[%s]" "{{curly}}"').read()
+        self.assertEqual(value, '[{curly}]')
 
 
 class TestOverrunShell(TestOverrun):
