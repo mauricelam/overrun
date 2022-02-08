@@ -7,8 +7,8 @@ class TestOverrun(unittest.TestCase):
     shell = False
 
     def test_simple(self):
-        value = cmd('printf "%s\n" "Hello world"', shell=self.shell).read()
-        self.assertEqual(value, 'Hello world')
+        value = cmd('printf "[%s]" "Hello world"', shell=self.shell).read()
+        self.assertEqual(value, '[Hello world]')
 
     def test_value_interpolation(self):
         testing = 'Testing 123'
@@ -17,11 +17,11 @@ class TestOverrun(unittest.TestCase):
 
     def test_value_interpolation_newline(self):
         testing = 'Testing\n123'
-        value = cmd('printf "%s\n" {testing}', shell=self.shell).read()
-        self.assertEqual(value, 'Testing\n123')
+        value = cmd('printf "[%s]" {testing}', shell=self.shell).read()
+        self.assertEqual(value, '[Testing\n123]')
 
     def test_function_call(self):
-        value = cmd('printf "[%s]\n" {"a".join("12345")}', shell=self.shell).read()
+        value = cmd('printf "[%s]" {"a".join("12345")}', shell=self.shell).read()
         self.assertEqual(value, '[1a2a3a4a5]')
 
     def test_bool_result(self):
@@ -93,6 +93,11 @@ class TestOverrun(unittest.TestCase):
     def test_escaped_curly_braces(self):
         value = cmd('printf "[%s]" "{{curly}}"').read()
         self.assertEqual(value, '[{curly}]')
+
+    def test_option_equals(self):
+        test = 'testing 123'
+        value = cmd('printf "[%s]" --test={test} second').read()
+        self.assertEqual(value, '[--test=testing 123][second]')
 
 
 class TestOverrunShell(TestOverrun):
