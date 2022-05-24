@@ -189,7 +189,7 @@ class CmdObject:
         return subprocess.Popen(self.cmd, shell=self._shell, **kwargs)
 
     def _display_cmd(self):
-        return self.cmd
+        return ' '.join(shlex.quote(x) for x in self.cmd)
 
     def __repr__(self):
         return f'CmdObject(cmd={self.cmd})'
